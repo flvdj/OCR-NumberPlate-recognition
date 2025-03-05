@@ -1,0 +1,147 @@
+import tkinter as tk
+from tkinter import filedialog
+import cv2
+import pytesseract
+import re
+from collections import deque
+import pandas as pd
+
+def extract_alphanumeric(text):
+    return re.sub(r'\W+', '', text)
+
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
+vehicle_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_russian_plate_number.xml')
+
+root = tk.Tk()
+root.title("CAR_LICENSE_PLATE_RECOGNITION")
+
+video_file_path = ""
+excel_file_path = ""
+
+def run_code():
+    if not video_file_path:
+        print("Alege fisierul video")
+        return
+
+    cap = cv2.VideoCapture(video_file_path)
+
+    width = int(cap.get(3))
+    height = int(cap.get(4))
+
+    display_width = 1200
+    aspect_ratio = width / height
+    display_height = int(display_width / aspect_ratio)
+
+    recently_detected_strings = deque(maxlen=5)
+    counter = 0
+    data = {'Masina': [], 'Numar_inmatriculare': []}
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        frame = cv2.resize(frame, (display_width, display_height))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        vehicles = vehicle_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(20, 20))
+
+        for (x, y, w, h) in vehicles:
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+            center_x = x + w // 2
+            center_y = y + h // 2
+
+            rectangle_width = int(w * 0.84)
+            rectangle_height = int(h * 0.9)
+
+            top_left = (center_x - rectangle_width // 2, center_y - rectangle_height // 2)
+            bottom_right = (center_x + rectangle_width // 2, center_y + rectangle_height // 2)
+
+            cv2.rectangle(frame, top_left, bottom_right, (0, 255, 0), 2)
+
+            roi = frame[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
+            gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+
+            _, thresh = cv2.threshold(gray_roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+            number_plate_text = pytesseract.image_to_string(thresh, config='--psm 8')
+            number_plate_text = extract_alphanumeric(number_plate_text)
+
+            if len(number_plate_text) == 8 and \
+               number_plate_text[0].isalpha() and \
+               number_plate_text[1:4].isdigit() and \
+               number_plate_text[4:6].isalpha() and \
+               number_plate_text[6:].isdigit():
+
+                is_unique = number_plate_text not in recently_detected_strings
+
+                if is_unique:
+                    recently_detected_strings.append(number_plate_text)
+
+                    if len(recently_detected_strings) > 1:
+                        prev_number = recently_detected_strings[-2]
+                        common_chars = set(number_plate_text).intersection(prev_number)
+                        if len(common_chars) <= 5:
+                            counter += 1
+                            data['Masina'].append(counter)
+                            data['Numar_inmatriculare'].append(recently_detected_strings[-2])
+                    else:
+                        counter += 1
+                        data['Masina'].append(counter)
+                        data['Numar_inmatriculare'].append("")
+
+        cv2.imshow('Number Plate Recognition', frame)
+
+        if cv2.waitKey(30) & 0xFF == ord('q'):
+            break
+
+    df = pd.DataFrame(data)
+    df_cleaned = df.dropna(subset=['Numar_inmatriculare'])
+    df_cleaned.to_excel("C:\\Users\\flavi\\rezultate_recunoastere_numar.xlsx", index=False)
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+def open_video_file():
+    global video_file_path
+    video_file_path = filedialog.askopenfilename(title="Selecteaza video", filetypes=[("Video files", "*.mp4")])
+
+def open_excel_file():
+    global excel_file_path
+    excel_file_path = filedialog.askopenfilename(title="Selecteaza fisierul Excel pentru afisare", filetypes=[("Excel files", "*.xlsx")])
+
+label1 = tk.Label(root, text="Universitatea Națională de Știință și Tehnologie Politehnica București", font=("Helvetica", 16), bg="#f2d3a7")
+label1.pack(pady=20)
+
+label2 = tk.Label(root, text="PROIECT PYTHON - RECUNOASTEREA NUMERELOR DE INMATRICULARE DIN VIDEO ", font=("Helvetica", 14), bg="#f2d3a7")
+label2.pack(pady=10)
+label2 = tk.Label(root, text="2024 ", font=("Helvetica", 14), bg="#f2d3a7")
+label2.pack(pady=10)
+label2 = tk.Label(root, text="PROIECT REALIZAT DE BAROIU SILVIAN, MARINESCU SILVIU-ANDREI, NISTOR FLAVIU-CRISTIAN ", font=("Helvetica", 14), bg="#f2d3a7")
+label2.pack(pady=10)
+label2 = tk.Label(root, text="  ", font=("Helvetica", 14), bg="#f2d3a7")
+label2.pack(pady=10)
+label2 = tk.Label(root, text="PASUL 1:", font=("Helvetica", 14), bg="#f2d3a7")
+label2.pack(pady=10)
+btn_open_video = tk.Button(root, text="Alege fisierul video", command=open_video_file, width=20, height=2)
+btn_open_video.pack(pady=10)
+label2 = tk.Label(root, text="PASUL 2:", font=("Helvetica", 14), bg="#f2d3a7")
+label2.pack(pady=10)
+
+btn_open_excel = tk.Button(root, text="Alege fisierul Excel", command=open_excel_file, width=20, height=2)
+btn_open_excel.pack(pady=10)
+label2 = tk.Label(root, text="PASUL 3:", font=("Helvetica", 14), bg="#f2d3a7")
+label2.pack(pady=10)
+btn_run = tk.Button(root, text="START", command=run_code, width=20, height=2)
+btn_run.pack(pady=10)
+
+root.configure(bg="#f2d3a7")
+root.geometry("1000x650")
+btn_run.pack(pady=10)
+btn_open_video.pack(pady=10)
+btn_open_excel.pack(pady=10)
+
+
+root.mainloop()
